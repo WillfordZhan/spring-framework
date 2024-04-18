@@ -1,9 +1,11 @@
 import org.apache.ignite.Ignite;
 import org.apache.ignite.Ignition;
+import org.apache.ignite.cluster.ClusterNode;
 import org.apache.ignite.compute.ComputeJob;
 import org.apache.ignite.compute.ComputeJobResult;
 import org.apache.ignite.compute.ComputeTaskSplitAdapter;
 import org.apache.ignite.configuration.IgniteConfiguration;
+
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
@@ -38,14 +40,25 @@ public class CacheMemoryStatisticsCollector {
         @Override
         public Collection<? extends ComputeJob> split(int gridSize, Collection<String> cacheNames) {
             List<ComputeJob> jobs = new ArrayList<>();
-            for (String cacheName : cacheNames) {
-                jobs.add(() -> {
-                    long allocatedSize = ignite.cache(cacheName).metrics().getOffHeapAllocatedSize();
-                    int entriesCount = ignite.cache(cacheName).metrics().getSize();
-                    String hostname = ignite.cluster().localNode().hostNames().iterator().next();
-                    CacheNodeStats stats = new CacheNodeStats(allocatedSize, entriesCount, hostname);
-                    return Map.of(cacheName, stats);
-                });
+            Collection<ClusterNode> nodes = ignite.cluster().nodes();
+            for (ClusterNode node : nodes) {
+                for (String cacheName : cacheNames) {
+                    jobs.add(new ComputeJob() {
+                        @Override
+                        public Object execute() {
+                            long allocatedSize = ignite.cache(cacheName).metrics().getOffHeapAllocatedSize();
+                            int entriesCount = ignite.cache(cacheName).metrics().getSize();
+                            String hostname = node.hostNames().iterator().next();
+                            CacheNodeStats stats = new CacheNodeStats(allocatedSize, entriesCount, hostname);
+                            return Map.of(cacheName, stats);
+                        }
+
+                        @Override
+                        public void cancel() {
+                            // Handle job cancellation if necessary
+                        }
+                    });
+                }
             }
             return jobs;
         }
